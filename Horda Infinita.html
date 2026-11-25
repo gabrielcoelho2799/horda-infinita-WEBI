@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Horda Infinita</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;700&display=swap">
+<style>
+:root{color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+--bg:#0d0922;--pn:#171136;--ln:#2e2563;--tx:#efeaff;--mu:#9a8fd0;--gold:#ffc83d;--pk:#ff4f8b;--cy:#4de1ff}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:"Chakra Petch","Trebuchet MS",system-ui,sans-serif}
+#app{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;max-width:1360px;margin:0 auto;padding:12px}
+#hud{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center;background:var(--pn);border:1px solid var(--ln);border-radius:10px;padding:8px 14px;margin-bottom:10px;font-weight:700}
+#hud span small{color:var(--mu);font-weight:500;margin-right:4px}
+#dinheiro{color:var(--gold);font-size:1.35rem}
+#barra{flex:1;min-width:120px;height:12px;background:#2a1f55;border-radius:6px;overflow:hidden}
+#vida{height:100%;width:100%;background:linear-gradient(90deg,var(--pk),#ff9a5c);transition:width .1s}
+#tela{width:100%;height:auto;display:block;border-radius:10px;border:1px solid var(--ln);background:#0a0720;cursor:crosshair;touch-action:none}
+#dica{color:var(--mu);font-size:.85rem;margin:8px 2px}
+aside{background:var(--pn);border:1px solid var(--ln);border-radius:10px;padding:10px;align-self:start;max-height:calc(100vh - 24px);overflow-y:auto}
+aside h2{margin:2px 4px 8px;font-size:1.05rem}
+.item{all:unset;box-sizing:border-box;display:flex;gap:10px;align-items:center;width:100%;padding:8px;margin-bottom:6px;border:1px solid var(--ln);border-radius:8px;cursor:pointer;opacity:.5}
+.item.ok{opacity:1;border-color:var(--gold);background:#241a4d}
+.item.ok:hover{background:#31235f}
+.item:focus-visible{outline:2px solid var(--cy)}
+.ic{font-size:1.6rem;width:34px;text-align:center}
+.tx{flex:1;display:flex;flex-direction:column;line-height:1.25}
+.tx em{color:var(--cy);font-style:normal;font-size:.8rem}
+.tx small{color:var(--mu)}
+.pr{color:var(--gold);font-weight:700}
+#reset{all:unset;cursor:pointer;color:var(--mu);font-size:.8rem;padding:6px 4px}
+#reset:focus-visible{outline:2px solid var(--cy)}
+@media (max-width:900px){#app{grid-template-columns:1fr}aside{max-height:none}}
+</style>
+</head>
+<body>
+<div id="app">
+  <main>
+    <div id="hud">
+      <span id="dinheiro">$0</span>
+      <span><small>Onda</small><b id="onda">1</b></span>
+      <span><small>Inimigos</small><b id="rest">0</b></span>
+      <span><small>Tempo</small><b id="tempo">0.0s</b> <small id="melhor"></small></span>
+      <span><small>DPS</small><b id="dps">0</b></span>
+      <div id="barra"><div id="vida"></div></div>
+    </div>
+    <canvas id="tela"></canvas>
+    <p id="dica">Andar: WASD ou setas. Clique na tela: golpe extra. Espaço: explosão (recarga de 8 s). Pegue as moedas para comprar armas.</p>
+  </main>
+  <aside>
+    <h2>Arsenal e melhorias</h2>
+    <div id="loja"></div>
+    <button id="reset">Apagar progresso</button>
+  </aside>
+</div>
+<script>
+/* ===== Horda Infinita =====
+   Conceitos da Aula 10 marcados nos comentários:
+   [FN] função normal  [ARROW] função anônima  [EVT] event listener  [ARR] métodos de array */
+
+// ---------- utilidades ----------
+const $ = s => document.querySelector(s);                       // [ARROW]
+const dist2 = (ax, ay, bx, by) => (ax - bx) ** 2 + (ay - by) ** 2; // [ARROW]
+const fmt = n => n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : Math.floor(n); // [ARROW]
+const W = 960, H = 600, cv = $('#tela'), ctx = cv.getContext('2d');
+cv.width = W; cv.height = H;
+
+// ---------- catálogo: array de objetos (armas e melhorias) ----------
+const catalogo = [
+  { id: 'estilingue', icone: '🪨', nome: 'Estilingue', desc: 'Pedra no inimigo mais próximo', tipo: 'arma', base: 15, dano: 9, cd: 0.55, nivel: 1, t: 0 },
+  { id: 'chamas', icone: '🔥', nome: 'Arco de chamas', desc: 'Flecha que incendeia', tipo: 'arma', base: 90, dano: 7, cd: 0.9, nivel: 0, t: 0 },
+  { id: 'bumerangue', icone: '🪃', nome: 'Bumerangue', desc: 'Vai e volta atingindo vários', tipo: 'arma', base: 400, dano: 16, cd: 1.7, nivel: 0, t: 0 },
+  { id: 'raio', icone: '⚡', nome: 'Raio em cadeia', desc: 'Pula entre inimigos', tipo: 'arma', base: 1500, dano: 22, cd: 1.1, nivel: 0, t: 0 },
+  { id: 'buraco', icone: '🌀', nome: 'Buraco negro', desc: 'Suga a horda para o centro', tipo: 'arma', base: 5000, dano: 14, cd: 6, nivel: 0, t: 0 },
+  { id: 'meteoros', icone: '☄️', nome: 'Chuva de meteoros', desc: 'Explosões em área', tipo: 'arma', base: 16000, dano: 70, cd: 3, nivel: 0, t: 0 },
+  { id: 'bota', icone: '👟', nome: 'Botas velozes', desc: '+8% de velocidade', tipo: 'util', base: 30, nivel: 0 },
+  { id: 'coracao', icone: '❤️', nome: 'Coração forte', desc: '+25 de vida máxima', tipo: 'util', base: 40, nivel: 0 },
+  { id: 'ima', icone: '🧲', nome: 'Ímã de moedas', desc: '+25 de alcance de coleta', tipo: 'util', base: 50, nivel: 0 },
+];
+const nv = id => catalogo.find(i => i.id === id).nivel;          // [ARR] find
+const dmg = it => it.dano * (1 + 0.5 * (it.nivel - 1));
+const custo = it => Math.round(it.base * Math.pow(1.6, it.nivel));
+
+// ---------- estado e salvamento ----------
+const CHAVE = 'hordaInfinita_v1';
+const e = { dinheiro: 0, onda: 1, recorde: 1, tempos: {}, fase: 'luta', faseT: 0, tempo: 0, aSpawnar: 0, spawnT: 0, kills: 0, hp: 100, nova: 0, shake: 0 };
+const p = { x: 0, y: 0, r: 12 };
+let inimigos = [], tiros = [], moedas = [], particulas = [], textos = [], efeitos = [];
+
+function salvar() { // [FN]
+  try { localStorage.setItem(CHAVE, JSON.stringify({ dinheiro: e.dinheiro, onda: e.onda, recorde: e.recorde, tempos: e.tempos, niveis: catalogo.map(i => i.nivel) })); } catch (err) {}
+}
+function carregar() { // [FN]
+  try {
+    const s = JSON.parse(localStorage.getItem(CHAVE));
+    if (!s) return;
+    Object.assign(e, { dinheiro: s.dinheiro || 0, onda: s.onda || 1, recorde: s.recorde || 1, tempos: s.tempos || {} });
+    (s.niveis || []).forEach((n, k) => { if (catalogo[k]) catalogo[k].nivel = n; }); // [ARR] forEach
+  } catch (err) {}
+}
+carregar();
+const hpMax = () => 100 + 25 * nv('coracao');
+const vel = () => 175 * (1 + 0.08 * nv('bota'));
+const ima = () => 60 + 25 * nv('ima');
+
+// ---------- ondas e inimigos ----------
+function iniciarOnda() { // [FN]
+  inimigos = []; tiros = []; efeitos = [];
+  e.fase = 'luta'; e.tempo = 0; e.spawnT = 0; e.hp = hpMax();
+  e.aSpawnar = 6 + Math.floor(e.onda * 3.5);
+  if (e.onda % 5 === 0) spawnarInimigo(true);
+}
+function spawnarInimigo(boss = false) { // [FN]
+  const ang = Math.random() * Math.PI * 2, d = 520;
+  const hp = Math.round((10 + e.onda * 7) * (1 + e.onda * 0.12) * (boss ? 12 : 1));
+  inimigos.push({
+    x: p.x + Math.cos(ang) * d, y: p.y + Math.sin(ang) * d, hp, hpMax: hp, boss,
+    r: boss ? 32 : 11 + Math.random() * 4, v: (boss ? 42 : 55 + Math.random() * 25) + e.onda * 1.5,
+    cor: boss ? '#ff4f8b' : `hsl(${(e.onda * 37 + Math.random() * 40) % 360} 85% 60%)`,
+    valor: Math.ceil((2 + e.onda * e.onda * 0.35 + e.onda) * (boss ? 15 : 1)), burn: 0, fogo: 0, flash: 0,
+  });
+}
+function causarDano(i, d, cor = '#fff') { // [FN]
+  i.hp -= d; i.flash = 0.08;
+  if (textos.length < 70) textos.push({ x: i.x, y: i.y - i.r, txt: fmt(d), t: 0.7, cor });
+}
+function explosao(x, y, cor, n = 8) { // [FN]
+  for (let k = 0; k < n; k++) {
+    const a = Math.random() * 6.28, v = 40 + Math.random() * 160;
+    particulas.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, t: 0.5, cor });
+  }
+}
+const maisProximo = (x, y, lista = inimigos, ex = []) => // [ARROW] + [ARR] filter/reduce
+  lista.filter(i => !ex.includes(i))
+       .reduce((m, i) => { const d = dist2(x, y, i.x, i.y); return d < m.d ? { i, d } : m; }, { i: null, d: Infinity }).i;
+
+// ---------- ataques: um objeto de arrow functions, uma por arma ----------
+const ataques = {
+  estilingue: it => disparar(it, '#ffe08a', 5, 540, false),
+  chamas: it => disparar(it, '#ff7a1a', 7, 460, true),
+  bumerangue: it => {
+    const a = maisProximo(p.x, p.y); if (!a) return;
+    const d = Math.hypot(a.x - p.x, a.y - p.y) || 1;
+    tiros.push({ tipo: 'bum', x: p.x, y: p.y, dx: (a.x - p.x) / d, dy: (a.y - p.y) / d, dist: 0, volta: false, acertos: new Set(), dano: dmg(it), r: 13, cor: '#7dff9b', rot: 0 });
+  },
+  raio: it => {
+    let atual = { x: p.x, y: p.y }; const usados = [], pontos = [{ x: p.x, y: p.y }];
+    for (let k = 0; k < 3 + Math.floor(it.nivel / 2); k++) {
+      const a = maisProximo(atual.x, atual.y, inimigos.filter(i => dist2(atual.x, atual.y, i.x, i.y) < 230 ** 2), usados);
+      if (!a) break;
+      usados.push(a); causarDano(a, dmg(it), '#9ad7ff'); pontos.push({ x: a.x, y: a.y }); atual = a;
+    }
+    if (pontos.length > 1) efeitos.push({ tipo: 'raio', pontos, t: 0.15 });
+  },
+  buraco: it => { const a = maisProximo(p.x, p.y); if (a) efeitos.push({ tipo: 'buraco', x: a.x, y: a.y, t: 2.5, tick: 0, dano: dmg(it) * 0.5 }); },
+  meteoros: it => {
+    const n = 3 + Math.floor(it.nivel / 2);
+    for (let k = 0; k < n; k++) {
+      const a = inimigos[Math.floor(Math.random() * inimigos.length)]; if (!a) return;
+      efeitos.push({ tipo: 'meteoro', x: a.x + (Math.random() - .5) * 40, y: a.y + (Math.random() - .5) * 40, t: 0.6, dano: dmg(it), raio: 75 });
+    }
+  },
+};
+function disparar(it, cor, r, v, fogo) { // [FN]
+  const a = maisProximo(p.x, p.y); if (!a) return;
+  const d = Math.hypot(a.x - p.x, a.y - p.y) || 1;
+  tiros.push({ tipo: 'pedra', x: p.x, y: p.y, vx: (a.x - p.x) / d * v, vy: (a.y - p.y) / d * v, dano: dmg(it), r, cor, fogo, vida: 1.6 });
+}
+function usarNova() { // [FN]
+  if (e.nova > 0) return;
+  e.nova = 8; e.shake = 0.25;
+  inimigos.forEach(i => { if (dist2(p.x, p.y, i.x, i.y) < 190 ** 2) causarDano(i, 40 + e.onda * 12, '#4de1ff'); }); // [ARR] forEach
+  efeitos.push({ tipo: 'nova', x: p.x, y: p.y, t: 0.35 });
+}
+
+// ---------- atualização do jogo ----------
+const teclas = {};
+function atualizar(dt) { // [FN]
+  e.nova = Math.max(0, e.nova - dt); e.shake = Math.max(0, e.shake - dt);
+  if (e.fase === 'morto') { e.faseT -= dt; if (e.faseT <= 0) iniciarOnda(); return; }
+  if (e.fase === 'pausa') { e.faseT -= dt; if (e.faseT <= 0) { e.onda++; iniciarOnda(); salvar(); } }
+  else {
+    e.tempo += dt; e.spawnT -= dt;
+    while (e.spawnT <= 0 && e.aSpawnar > 0 && inimigos.length < 260) {
+      spawnarInimigo(); e.aSpawnar--; e.spawnT += Math.max(0.12, 0.9 - e.onda * 0.04);
+    }
+  }
+  // jogador
+  let mx = (teclas.d || teclas.arrowright ? 1 : 0) - (teclas.a || teclas.arrowleft ? 1 : 0);
+  let my = (teclas.s || teclas.arrowdown ? 1 : 0) - (teclas.w || teclas.arrowup ? 1 : 0);
+  const m = Math.hypot(mx, my) || 1; p.x += mx / m * vel() * dt; p.y += my / m * vel() * dt;
+  // armas: todas as que o jogador possui atiram sozinhas
+  catalogo.filter(i => i.tipo === 'arma' && i.nivel > 0).forEach(it => { // [ARR] filter + forEach
+    it.t -= dt; if (it.t <= 0 && inimigos.length) { it.t = it.cd; ataques[it.id](it); }
+  });
+  // projéteis
+  tiros.forEach(t => {
+    if (t.tipo === 'pedra') {
+      t.x += t.vx * dt; t.y += t.vy * dt; t.vida -= dt;
+      const alvo = inimigos.find(i => dist2(t.x, t.y, i.x, i.y) < (i.r + t.r) ** 2);
+      if (alvo) { causarDano(alvo, t.dano, t.fogo ? '#ffb066' : '#fff'); if (t.fogo) { alvo.burn = 3; alvo.fogo = t.dano * 0.5; } t.vida = 0; }
+    } else {
+      t.rot += dt * 14;
+      const v = 380 * dt;
+      if (!t.volta) { t.x += t.dx * v; t.y += t.dy * v; t.dist += v; if (t.dist > 240 + t.dano) { t.volta = true; t.acertos.clear(); } }
+      else { const d = Math.hypot(p.x - t.x, p.y - t.y) || 1; t.x += (p.x - t.x) / d * v * 1.2; t.y += (p.y - t.y) / d * v * 1.2; if (d < 18) t.vida = 0; }
+      inimigos.forEach(i => { if (!t.acertos.has(i) && dist2(t.x, t.y, i.x, i.y) < (i.r + t.r) ** 2) { t.acertos.add(i); causarDano(i, t.dano, '#7dff9b'); } });
+      if (t.vida === undefined) t.vida = 1;
+    }
+  });
+  tiros = tiros.filter(t => t.vida > 0); // [ARR] filter
+  // efeitos (buraco negro, meteoros...)
+  efeitos.forEach(f => {
+    f.t -= dt;
+    if (f.tipo === 'buraco') {
+      f.tick -= dt;
+      inimigos.forEach(i => {
+        const d = Math.hypot(f.x - i.x, f.y - i.y);
+        if (d < 190 && d > 4) { i.x += (f.x - i.x) / d * 150 * dt; i.y += (f.y - i.y) / d * 150 * dt; }
+        if (f.tick <= 0 && d < 190) causarDano(i, f.dano, '#c79bff');
+      });
+      if (f.tick <= 0) f.tick = 0.25;
+    }
+    if (f.tipo === 'meteoro' && f.t <= 0 && !f.fim) {
+      f.fim = true; e.shake = 0.15; explosao(f.x, f.y, '#ffb347', 14);
+      inimigos.forEach(i => { if (dist2(f.x, f.y, i.x, i.y) < (f.raio + i.r) ** 2) causarDano(i, f.dano, '#ffb347'); });
+    }
+  });
+  efeitos = efeitos.filter(f => f.t > 0);
+  // inimigos
+  inimigos.forEach(i => {
+    const d = Math.hypot(p.x - i.x, p.y - i.y) || 1;
+    i.x += (p.x - i.x) / d * i.v * dt; i.y += (p.y - i.y) / d * i.v * dt; i.flash -= dt;
+    if (i.burn > 0) { i.burn -= dt; i.hp -= i.fogo * dt; }
+    if (d < p.r + i.r) e.hp -= (i.boss ? 30 : 12) * dt;
+  });
+  const vivos = [];
+  inimigos.forEach(i => { // mortes: moeda cai no chão
+    if (i.hp > 0) vivos.push(i);
+    else { moedas.push({ x: i.x, y: i.y, v: i.valor, vida: 20 }); explosao(i.x, i.y, i.cor, i.boss ? 30 : 6); e.kills++; if (i.boss) e.shake = 0.4; }
+  });
+  inimigos = vivos;
+  // moedas: o jogador precisa andar até elas
+  moedas.forEach(c => {
+    c.vida -= dt;
+    const d = Math.hypot(p.x - c.x, p.y - c.y);
+    if (d < ima() + 60) { c.x += (p.x - c.x) / (d || 1) * 320 * dt; c.y += (p.y - c.y) / (d || 1) * 320 * dt; }
+    if (d < 20) { e.dinheiro += c.v; c.vida = 0; textos.push({ x: p.x, y: p.y - 22, txt: '+$' + fmt(c.v), t: 0.6, cor: '#ffc83d' }); }
+  });
+  moedas = moedas.filter(c => c.vida > 0);
+  particulas.forEach(q => { q.t -= dt; q.x += q.vx * dt; q.y += q.vy * dt; });
+  particulas = particulas.filter(q => q.t > 0);
+  textos.forEach(x => { x.t -= dt; x.y -= 40 * dt; });
+  textos = textos.filter(x => x.t > 0);
+  // fim da onda / morte
+  if (e.hp <= 0) { e.fase = 'morto'; e.faseT = 1.8; }
+  else if (e.fase === 'luta' && e.aSpawnar === 0 && inimigos.length === 0) {
+    e.fase = 'pausa'; e.faseT = 3; e.hp = hpMax();
+    if (!e.tempos[e.onda] || e.tempo < e.tempos[e.onda]) e.tempos[e.onda] = e.tempo;
+    e.recorde = Math.max(e.recorde, e.onda + 1);
+  }
+}
+
+// ---------- desenho ----------
+function desenhar() { // [FN]
+  ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  const sx = e.shake ? (Math.random() - .5) * 14 * e.shake * 4 : 0, sy = e.shake ? (Math.random() - .5) * 14 * e.shake * 4 : 0;
+  ctx.translate(W / 2 - p.x + sx, H / 2 - p.y + sy);          // câmera segue o jogador
+  const g = 80, x0 = Math.floor((p.x - W / 2) / g) * g, y0 = Math.floor((p.y - H / 2) / g) * g;
+  ctx.strokeStyle = '#1d1650'; ctx.lineWidth = 1; ctx.beginPath();
+  for (let x = x0; x < p.x + W / 2 + g; x += g) { ctx.moveTo(x, y0); ctx.lineTo(x, y0 + H + g); }
+  for (let y = y0; y < p.y + H / 2 + g; y += g) { ctx.moveTo(x0, y); ctx.lineTo(x0 + W + g, y); }
+  ctx.stroke();
+  // moedas
+  moedas.forEach(c => { ctx.fillStyle = '#ffc83d'; ctx.beginPath(); ctx.arc(c.x, c.y, 6, 0, 6.28); ctx.fill(); ctx.fillStyle = '#fff3b0'; ctx.fillRect(c.x - 1, c.y - 4, 2, 8); });
+  // efeitos
+  efeitos.forEach(f => {
+    if (f.tipo === 'buraco') { const r = 30 + Math.sin(f.t * 12) * 4; const gr = ctx.createRadialGradient(f.x, f.y, 2, f.x, f.y, 190); gr.addColorStop(0, 'rgba(160,90,255,.5)'); gr.addColorStop(1, 'rgba(160,90,255,0)'); ctx.fillStyle = gr; ctx.beginPath(); ctx.arc(f.x, f.y, 190, 0, 6.28); ctx.fill(); ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(f.x, f.y, r, 0, 6.28); ctx.fill(); }
+    if (f.tipo === 'meteoro') { ctx.strokeStyle = 'rgba(255,120,60,.8)'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(f.x, f.y, f.raio * (1 - f.t / .6) + 8, 0, 6.28); ctx.stroke(); ctx.fillStyle = '#ffb347'; ctx.beginPath(); ctx.arc(f.x, f.y - f.t * 900, 9, 0, 6.28); ctx.fill(); }
+    if (f.tipo === 'raio') { ctx.strokeStyle = '#bfe8ff'; ctx.lineWidth = 3; ctx.beginPath(); f.pontos.forEach((q, k) => k ? ctx.lineTo(q.x + (Math.random() - .5) * 8, q.y + (Math.random() - .5) * 8) : ctx.moveTo(q.x, q.y)); ctx.stroke(); }
+    if (f.tipo === 'nova' || f.tipo === 'clique') { ctx.strokeStyle = f.tipo === 'nova' ? '#4de1ff' : '#ffc83d'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(f.x, f.y, (f.tipo === 'nova' ? 190 : 34) * (1 - f.t / .35), 0, 6.28); ctx.stroke(); }
+  });
+  // inimigos
+  inimigos.forEach(i => {
+    ctx.fillStyle = i.flash > 0 ? '#fff' : i.cor; ctx.beginPath(); ctx.arc(i.x, i.y, i.r, 0, 6.28); ctx.fill();
+    ctx.fillStyle = '#0d0922'; ctx.fillRect(i.x - i.r * .5, i.y - i.r * .25, i.r * .3, i.r * .3); ctx.fillRect(i.x + i.r * .2, i.y - i.r * .25, i.r * .3, i.r * .3);
+    if (i.burn > 0) { ctx.fillStyle = 'rgba(255,140,40,.55)'; ctx.beginPath(); ctx.arc(i.x, i.y - i.r, i.r * .6, 0, 6.28); ctx.fill(); }
+    if (i.boss) { ctx.fillStyle = '#000'; ctx.fillRect(i.x - 30, i.y - i.r - 12, 60, 6); ctx.fillStyle = '#ff4f8b'; ctx.fillRect(i.x - 30, i.y - i.r - 12, 60 * Math.max(0, i.hp) / i.hpMax, 6); }
+  });
+  // projéteis
+  tiros.forEach(t => {
+    ctx.shadowColor = t.cor; ctx.shadowBlur = 12; ctx.fillStyle = t.cor;
+    if (t.tipo === 'bum') { ctx.save(); ctx.translate(t.x, t.y); ctx.rotate(t.rot); ctx.fillRect(-13, -3, 26, 6); ctx.fillRect(-3, -13, 6, 26); ctx.restore(); }
+    else { ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, 6.28); ctx.fill(); }
+    ctx.shadowBlur = 0;
+  });
+  // jogador
+  ctx.shadowColor = '#4de1ff'; ctx.shadowBlur = 18; ctx.fillStyle = '#4de1ff'; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, 6.28); ctx.fill(); ctx.shadowBlur = 0;
+  ctx.strokeStyle = 'rgba(77,225,255,.25)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(p.x, p.y, ima(), 0, 6.28); ctx.stroke();
+  // partículas e números de dano
+  ctx.globalCompositeOperation = 'lighter';
+  particulas.forEach(q => { ctx.globalAlpha = Math.max(0, q.t * 2); ctx.fillStyle = q.cor; ctx.fillRect(q.x - 2, q.y - 2, 4, 4); });
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.font = '700 14px "Chakra Petch",sans-serif'; ctx.textAlign = 'center';
+  textos.forEach(x => { ctx.globalAlpha = Math.min(1, x.t * 2); ctx.fillStyle = x.cor; ctx.fillText(x.txt, x.x, x.y); });
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  // faixas de aviso em tela
+  const aviso = e.fase === 'pausa' ? `Onda ${e.onda} concluída em ${e.tempo.toFixed(1)}s` : e.fase === 'morto' ? 'Você caiu. A onda recomeça…' : (e.tempo < 2 ? (e.onda % 5 === 0 ? `Onda ${e.onda}: chefe!` : `Onda ${e.onda}`) : '');
+  if (aviso) { ctx.font = '700 34px "Chakra Petch",sans-serif'; ctx.textAlign = 'center'; ctx.fillStyle = '#efeaff'; ctx.fillText(aviso, W / 2, 90); }
+  if (e.nova > 0) { ctx.font = '700 13px "Chakra Petch",sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#9a8fd0'; ctx.fillText(`Explosão em ${e.nova.toFixed(1)}s`, 14, H - 14); }
+  else { ctx.font = '700 13px "Chakra Petch",sans-serif'; ctx.textAlign = 'left'; ctx.fillStyle = '#4de1ff'; ctx.fillText('Explosão pronta (Espaço)', 14, H - 14); }
+}
+
+// ---------- interface (HUD e loja) ----------
+const loja = $('#loja');
+function construirLoja() { // [FN] monta a loja uma vez só, com map()
+  loja.innerHTML = catalogo.map(i => `<button class="item" data-id="${i.id}"><span class="ic">${i.icone}</span><span class="tx"><b>${i.nome}</b><em></em><small>${i.desc}</small></span><span class="pr"></span></button>`).join(''); // [ARR] map
+}
+function atualizarLoja() { // [FN] só troca textos e classes, para o clique nunca se perder
+  [...loja.children].forEach((b, k) => {
+    const it = catalogo[k], c = custo(it);
+    b.classList.toggle('ok', e.dinheiro >= c);
+    b.querySelector('em').textContent = it.nivel ? ' nível ' + it.nivel : ' novo';
+    b.querySelector('.pr').textContent = '$' + fmt(c);
+  });
+}
+function atualizarHud() { // [FN]
+  $('#dinheiro').textContent = '$' + fmt(e.dinheiro);
+  $('#onda').textContent = e.onda; $('#rest').textContent = e.aSpawnar + inimigos.length;
+  $('#tempo').textContent = e.tempo.toFixed(1) + 's';
+  $('#melhor').textContent = e.tempos[e.onda] ? 'melhor ' + e.tempos[e.onda].toFixed(1) + 's' : '';
+  $('#vida').style.width = Math.max(0, e.hp / hpMax() * 100) + '%';
+  // [ARR] reduce: soma o dano por segundo de todas as armas
+  const dps = catalogo.filter(i => i.tipo === 'arma' && i.nivel > 0).reduce((s, i) => s + dmg(i) / i.cd, 0);
+  $('#dps').textContent = fmt(dps);
+  atualizarLoja();
+}
+
+// ---------- eventos ----------
+loja.addEventListener('click', ev => { // [EVT] um único listener para todos os botões
+  const b = ev.target.closest('.item'); if (!b) return;
+  const it = catalogo.find(i => i.id === b.dataset.id), c = custo(it);
+  if (e.dinheiro < c) return;
+  e.dinheiro -= c; it.nivel++;
+  if (it.id === 'coracao') e.hp += 25;
+  salvar(); atualizarHud();
+});
+addEventListener('keydown', ev => { // [EVT]
+  const k = ev.key.toLowerCase(); teclas[k] = true;
+  if (ev.code === 'Space') { usarNova(); ev.preventDefault(); }
+  if (k.startsWith('arrow')) ev.preventDefault();
+});
+addEventListener('keyup', ev => { teclas[ev.key.toLowerCase()] = false; }); // [EVT]
+addEventListener('blur', () => { Object.keys(teclas).forEach(k => { teclas[k] = false; }); });
+cv.addEventListener('click', ev => { // [EVT] golpe extra no ponto clicado
+  const r = cv.getBoundingClientRect();
+  const x = (ev.clientX - r.left) * W / r.width + p.x - W / 2, y = (ev.clientY - r.top) * H / r.height + p.y - H / 2;
+  const d = 6 + e.onda * 3;
+  inimigos.forEach(i => { if (dist2(x, y, i.x, i.y) < (i.r + 28) ** 2) causarDano(i, d, '#ffc83d'); });
+  efeitos.push({ tipo: 'clique', x, y, t: 0.35 });
+});
+let confirma = false;
+$('#reset').addEventListener('click', ev => { // [EVT] confirmação em dois cliques
+  if (!confirma) { confirma = true; ev.target.textContent = 'Clique de novo para apagar'; return; }
+  try { localStorage.removeItem(CHAVE); } catch (err) {}
+  location.reload();
+});
+
+// ---------- laço principal ----------
+construirLoja(); iniciarOnda();
+let ultimo = performance.now(), hudT = 0;
+function quadro(agora) { // [FN]
+  const dt = Math.min(0.05, (agora - ultimo) / 1000); ultimo = agora;
+  atualizar(dt); desenhar();
+  hudT -= dt; if (hudT <= 0) { atualizarHud(); hudT = 0.1; }
+  requestAnimationFrame(quadro);
+}
+requestAnimationFrame(quadro);
+</script>
+</body>
+</html>
